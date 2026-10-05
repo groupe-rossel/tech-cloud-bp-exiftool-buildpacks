@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LAYERS_DIR=$1
+
+EXIFTOOL_BIN_VERSION="13.59"
+EXIFTOOL_BIN_SHA256="a5f9e806179d3ff940371a524a5bfdb53320e65e8b8ed6eb1fa75f83957c09d9"
+EXIFTOOL_BIN_ASSET="exiftool-amd64-glibc"
+EXIFTOOL_BIN_URL="https://github.com/pulsejet/exiftool-bin/releases/download/${EXIFTOOL_BIN_VERSION}/${EXIFTOOL_BIN_ASSET}"
+
+LAYER_NAME="exiftool"
+EXIFTOOL_LAYER="${LAYERS_DIR}/${LAYER_NAME}"
+
+echo "---> Initializing ExifTool Buildpack Layer"
+
+cat > "${EXIFTOOL_LAYER}.toml" <<EOF
+[types]
+build = true
+cache = true
+launch = true
+EOF
+
+mkdir -p "${EXIFTOOL_LAYER}/bin"
+
+DOWNLOAD_PATH="$(mktemp)"
+trap 'rm -f "${DOWNLOAD_PATH}"' EXIT
+
+echo "-----> Downloading ExifTool ${EXIFTOOL_BIN_VERSION} (${EXIFTOOL_BIN_ASSET})"
+if ! curl -fsSL --retry 3 --retry-connrefused --connect-timeout 10 \
+  -o "${DOWNLOAD_PATH}" "${EXIFTOOL_BIN_URL}"; then
+  echo "ERROR: Failed to download ExifTool from ${EXIFTOOL_BIN_URL}"
+  exit 1
+fi
+
+if [[ ! -s "${DOWNLOAD_PATH}" ]]; then
+  echo "ERROR: Downloaded ExifTool artefact is empty: ${EXIFTOOL_BIN_URL}"
+  exit 1
+fi
+
+ACTUAL_SHA256="$(sha256sum "${DOWNLOAD_PATH}" | awk '{print $1}')"
+if [[ "${ACTUAL_SHA256}" != "${EXIFTOOL_BIN_SHA256}" ]]; then
+  echo "ERROR: ExifTool SHA-256 mismatch."
+  echo "  expected: ${EXIFTOOL_BIN_SHA256}"
+  echo "  actual:   ${ACTUAL_SHA256}"
+  exit 1
+fi
+
+install -m 0755 "${DOWNLOAD_PATH}" "${EXIFTOOL_LAYER}/bin/exiftool"
+
+mkdir -p "${EXIFTOOL_LAYER}/env.build" "${EXIFTOOL_LAYER}/env.launch"
+echo -n "${EXIFTOOL_LAYER}/bin" > "${EXIFTOOL_LAYER}/env.build/PATH.append"
+echo -n ":" > "${EXIFTOOL_LAYER}/env.build/PATH.delim"
+echo -n "${EXIFTOOL_LAYER}/bin" > "${EXIFTOOL_LAYER}/env.launch/PATH.append"
+echo -n ":" > "${EXIFTOOL_LAYER}/env.launch/PATH.delim"
+
+export PATH="${EXIFTOOL_LAYER}/bin${PATH:+:$PATH}"
+
+echo "-----> Verifying ExifTool installation"
+exiftool -ver
+
+echo "-----> ExifTool ${EXIFTOOL_BIN_VERSION} successfully installed"

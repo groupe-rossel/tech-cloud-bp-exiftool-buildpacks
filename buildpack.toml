@@ -1,0 +1,10 @@
+api = "0.8"
+
+[buildpack]
+id = "be.rossel.tech.exiftool"
+version = "0.1.0"
+name = "ExifTool Buildpack"
+
+[[targets]]
+os = "linux"
+arch = "amd64"

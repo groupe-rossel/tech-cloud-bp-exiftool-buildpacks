@@ -1,0 +1,25 @@
+name: CODEOWNERS Generation
+on:
+  schedule:
+    - cron: "0 5 * * *" # Daily at 5 AM UTC
+  workflow_dispatch: # Manual trigger for testing
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/codeowners-gen.yaml"
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: write
+  issues: read
+  checks: write
+jobs:
+  generate-codeowners:
+    if: ${{ !endsWith(github.repository, '-goldenstack') }}
+    uses: groupe-rossel/tech-cloud-github-reusable-workflows/.github/workflows/auto-generate-codeowners.yaml@stable
+    with:
+      repository_name: ${{ github.event.repository.name }}
+    secrets:
+      GH_INIT_TPL_APP_ID: ${{ secrets.GH_INIT_TPL_APP_ID }}
+      GH_INIT_TPL_APP_PRIVATE_KEY: ${{ secrets.GH_INIT_TPL_APP_PRIVATE_KEY }}
