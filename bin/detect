@@ -1,3 +1,11 @@
 #!/usr/bin/env bash
 
-exit 0
+echo "-----> Verifying ExifTool installation"
+INSTALLED_VERSION="$(exiftool -ver)"
+if [[ "${INSTALLED_VERSION}" != "${EXIFTOOL_BIN_VERSION}" ]]; then
+  echo "ERROR: ExifTool version mismatch."
+  echo "  expected: ${EXIFTOOL_BIN_VERSION}"
+  echo "  actual:   ${INSTALLED_VERSION}"
+  exit 1
+fi
+echo "-----> ExifTool ${INSTALLED_VERSION} OK"
