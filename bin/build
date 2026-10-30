@@ -3,10 +3,10 @@ set -euo pipefail
 
 LAYERS_DIR=$1
 
-EXIFTOOL_BIN_VERSION="13.59"
+EXIFTOOL_BIN_VERSION="13.60"
 EXIFTOOL_BIN_SHA256="a5f9e806179d3ff940371a524a5bfdb53320e65e8b8ed6eb1fa75f83957c09d9"
 EXIFTOOL_BIN_ASSET="exiftool-amd64-glibc"
-EXIFTOOL_BIN_URL="https://github.com/pulsejet/exiftool-bin/releases/download/${EXIFTOOL_BIN_VERSION}/${EXIFTOOL_BIN_ASSET}"
+EXIFTOOL_BIN_URL="https://github.com/groupe-rossel/tech-cloud-bp-exiftool-buildpacks/releases/download/${EXIFTOOL_BIN_VERSION}/${EXIFTOOL_BIN_ASSET}"
 
 LAYER_NAME="exiftool"
 EXIFTOOL_LAYER="${LAYERS_DIR}/${LAYER_NAME}"

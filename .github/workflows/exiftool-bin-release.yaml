@@ -1,0 +1,165 @@
+name: exiftool-bin-release
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "ExifTool version to build (empty = latest tag from exiftool/exiftool)"
+        required: false
+        type: string
+
+jobs:
+  prepare:
+    name: resolve-version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      exists: ${{ steps.skip.outputs.exists }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Resolve ExifTool version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${INPUT_VERSION}" ]]; then
+            VERSION="${INPUT_VERSION}"
+          else
+            VERSION="$(gh api repos/exiftool/exiftool/tags --jq '.[0].name')"
+          fi
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: Invalid ExifTool version: '${VERSION}'"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved ExifTool version: ${VERSION}"
+
+      - name: Skip if release already exists
+        id: skip
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "${VERSION}" --repo "${REPO}" >/dev/null 2>&1; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+            echo "Release ${VERSION} already exists — skipping build"
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+            echo "Release ${VERSION} not found — will build"
+          fi
+
+  build:
+    name: build-amd64-glibc
+    needs: prepare
+    if: needs.prepare.outputs.exists == 'false'
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            gcc \
+            git \
+            gnupg \
+            libperl-dev \
+            make \
+            perl \
+            unzip \
+            wget \
+            zip
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build binary
+        env:
+          EXIFTOOL_VERSION: ${{ needs.prepare.outputs.version }}
+        run: bash scripts/build-exiftool-bin.sh
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: exiftool-amd64-glibc
+          path: |
+            dist/exiftool-amd64-glibc
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: create-github-release
+    needs: [prepare, build]
+    if: needs.prepare.outputs.exists == 'false'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: exiftool-amd64-glibc
+          path: dist
+
+      - name: Verify artifact checksum
+        id: checksum
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c SHA256SUMS
+          SHA256="$(awk '{print $1; exit}' SHA256SUMS)"
+          if [[ ! "${SHA256}" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "ERROR: Invalid SHA-256 in SHA256SUMS: '${SHA256}'"
+            exit 1
+          fi
+          echo "sha256=${SHA256}" >> "${GITHUB_OUTPUT}"
+          echo "Verified SHA-256: ${SHA256}"
+
+      - name: Create GitHub release
+        env:
+          SHA256: ${{ steps.checksum.outputs.sha256 }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          NOTES="$(cat <<EOF
+          Standalone ExifTool ${VERSION} binary for linux amd64/glibc.
+
+          SHA-256 (\`exiftool-amd64-glibc\`): \`${SHA256}\`
+
+          Code source: https://github.com/exiftool/exiftool/tags (tag ${VERSION}).
+          Built from https://github.com/exiftool/exiftool/archive/refs/tags/${VERSION}.tar.gz
+
+          Packaging adapted from https://github.com/pulsejet/exiftool-bin
+          (commit a796daa98a47505db132e031837692313481850a).
+
+          Verify:
+          \`echo "${SHA256}  exiftool-amd64-glibc" | sha256sum -c -\`
+
+          Pin for bin/build: use the SHA-256 above.
+          EOF
+          )"
+          # Drop leading indentation from the heredoc body.
+          NOTES="$(printf '%s\n' "${NOTES}" | sed 's/^[[:space:]]*//')"
+          gh release create "${VERSION}" \
+            "dist/exiftool-amd64-glibc" \
+            "dist/SHA256SUMS" \
+            --repo "${REPO}" \
+            --title "${VERSION}" \
+            --notes "${NOTES}"
