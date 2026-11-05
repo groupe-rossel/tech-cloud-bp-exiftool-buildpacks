@@ -3,10 +3,8 @@ set -euo pipefail
 
 LAYERS_DIR=$1
 
-EXIFTOOL_BIN_VERSION="13.60"
-EXIFTOOL_BIN_SHA256="a5f9e806179d3ff940371a524a5bfdb53320e65e8b8ed6eb1fa75f83957c09d9"
+EXIFTOOL_BIN_REPO="groupe-rossel/tech-cloud-bp-exiftool-buildpacks"
 EXIFTOOL_BIN_ASSET="exiftool-amd64-glibc"
-EXIFTOOL_BIN_URL="https://github.com/groupe-rossel/tech-cloud-bp-exiftool-buildpacks/releases/download/${EXIFTOOL_BIN_VERSION}/${EXIFTOOL_BIN_ASSET}"
 
 LAYER_NAME="exiftool"
 EXIFTOOL_LAYER="${LAYERS_DIR}/${LAYER_NAME}"
@@ -22,22 +20,96 @@ EOF
 
 mkdir -p "${EXIFTOOL_LAYER}/bin"
 
-DOWNLOAD_PATH="$(mktemp)"
-trap 'rm -f "${DOWNLOAD_PATH}"' EXIT
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "${WORKDIR}"' EXIT
+
+resolve_latest_release() {
+  curl -fsSL --retry 3 --retry-connrefused --connect-timeout 10 \
+    "https://api.github.com/repos/${EXIFTOOL_BIN_REPO}/releases/latest" \
+    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
+    | head -n1
+}
+
+resolve_latest_major_release() {
+  local major="$1"
+  curl -fsSL --retry 3 --retry-connrefused --connect-timeout 10 \
+    "https://api.github.com/repos/${EXIFTOOL_BIN_REPO}/releases?per_page=100" \
+    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
+    | grep -E "^${major}\\.[0-9]+$" \
+    | sort -V \
+    | tail -n1
+}
+
+if [[ -n "${BP_EXIFTOOL_MAJOR_VERSION:-}" ]]; then
+  if [[ ! "${BP_EXIFTOOL_MAJOR_VERSION}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: BP_EXIFTOOL_MAJOR_VERSION must be an integer (got '${BP_EXIFTOOL_MAJOR_VERSION}')"
+    exit 1
+  fi
+  if (( BP_EXIFTOOL_MAJOR_VERSION < 13 )); then
+    echo "ERROR: BP_EXIFTOOL_MAJOR_VERSION must be >= 13 (got '${BP_EXIFTOOL_MAJOR_VERSION}')"
+    exit 1
+  fi
+
+  echo "-----> Resolving latest ExifTool ${BP_EXIFTOOL_MAJOR_VERSION}.x release from ${EXIFTOOL_BIN_REPO}"
+  EXIFTOOL_BIN_VERSION="$(resolve_latest_major_release "${BP_EXIFTOOL_MAJOR_VERSION}")"
+  if [[ -z "${EXIFTOOL_BIN_VERSION}" ]]; then
+    echo "ERROR: No release found for major version ${BP_EXIFTOOL_MAJOR_VERSION} in ${EXIFTOOL_BIN_REPO}"
+    exit 1
+  fi
+else
+  echo "-----> Resolving latest ExifTool release from ${EXIFTOOL_BIN_REPO}"
+  EXIFTOOL_BIN_VERSION="$(resolve_latest_release)"
+  if [[ -z "${EXIFTOOL_BIN_VERSION}" ]]; then
+    echo "ERROR: Failed to resolve latest release tag from ${EXIFTOOL_BIN_REPO}"
+    exit 1
+  fi
+fi
+
+if [[ ! "${EXIFTOOL_BIN_VERSION}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+  echo "ERROR: Invalid ExifTool release tag: '${EXIFTOOL_BIN_VERSION}'"
+  exit 1
+fi
+
+RELEASE_BASE_URL="https://github.com/${EXIFTOOL_BIN_REPO}/releases/download/${EXIFTOOL_BIN_VERSION}"
+SHA256SUMS_URL="${RELEASE_BASE_URL}/SHA256SUMS"
+EXIFTOOL_BIN_URL="${RELEASE_BASE_URL}/${EXIFTOOL_BIN_ASSET}"
+
+echo "-----> Selected release: ${EXIFTOOL_BIN_VERSION}"
+echo "-----> Downloading SHA256SUMS"
+if ! curl -fsSL --retry 3 --retry-connrefused --connect-timeout 10 \
+  -o "${WORKDIR}/SHA256SUMS" "${SHA256SUMS_URL}"; then
+  echo "ERROR: Failed to download SHA256SUMS from ${SHA256SUMS_URL}"
+  exit 1
+fi
+
+EXIFTOOL_BIN_SHA256="$(
+  awk -v asset="${EXIFTOOL_BIN_ASSET}" '$2 == asset { print $1; exit }' \
+    "${WORKDIR}/SHA256SUMS"
+)"
+
+if [[ -z "${EXIFTOOL_BIN_SHA256}" ]]; then
+  echo "ERROR: No SHA-256 entry for '${EXIFTOOL_BIN_ASSET}' in ${SHA256SUMS_URL}"
+  exit 1
+fi
+
+if [[ ! "${EXIFTOOL_BIN_SHA256}" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: Invalid SHA-256 for '${EXIFTOOL_BIN_ASSET}': '${EXIFTOOL_BIN_SHA256}'"
+  exit 1
+fi
 
 echo "-----> Downloading ExifTool ${EXIFTOOL_BIN_VERSION} (${EXIFTOOL_BIN_ASSET})"
 if ! curl -fsSL --retry 3 --retry-connrefused --connect-timeout 10 \
-  -o "${DOWNLOAD_PATH}" "${EXIFTOOL_BIN_URL}"; then
+  -o "${WORKDIR}/${EXIFTOOL_BIN_ASSET}" "${EXIFTOOL_BIN_URL}"; then
   echo "ERROR: Failed to download ExifTool from ${EXIFTOOL_BIN_URL}"
   exit 1
 fi
 
-if [[ ! -s "${DOWNLOAD_PATH}" ]]; then
+if [[ ! -s "${WORKDIR}/${EXIFTOOL_BIN_ASSET}" ]]; then
   echo "ERROR: Downloaded ExifTool artefact is empty: ${EXIFTOOL_BIN_URL}"
   exit 1
 fi
 
-ACTUAL_SHA256="$(sha256sum "${DOWNLOAD_PATH}" | awk '{print $1}')"
+ACTUAL_SHA256="$(sha256sum "${WORKDIR}/${EXIFTOOL_BIN_ASSET}" | awk '{print $1}')"
 if [[ "${ACTUAL_SHA256}" != "${EXIFTOOL_BIN_SHA256}" ]]; then
   echo "ERROR: ExifTool SHA-256 mismatch."
   echo "  expected: ${EXIFTOOL_BIN_SHA256}"
@@ -45,7 +117,7 @@ if [[ "${ACTUAL_SHA256}" != "${EXIFTOOL_BIN_SHA256}" ]]; then
   exit 1
 fi
 
-install -m 0755 "${DOWNLOAD_PATH}" "${EXIFTOOL_LAYER}/bin/exiftool"
+install -m 0755 "${WORKDIR}/${EXIFTOOL_BIN_ASSET}" "${EXIFTOOL_LAYER}/bin/exiftool"
 
 mkdir -p "${EXIFTOOL_LAYER}/env.build" "${EXIFTOOL_LAYER}/env.launch"
 echo -n "${EXIFTOOL_LAYER}/bin" > "${EXIFTOOL_LAYER}/env.build/PATH.append"

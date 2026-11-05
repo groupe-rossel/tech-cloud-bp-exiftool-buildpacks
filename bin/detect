@@ -1,11 +1,45 @@
 #!/usr/bin/env bash
+# CNB detect: participate only on supported platform (linux/amd64/glibc).
+# Args: $1 = platform dir, $2 = build plan path
+set -euo pipefail
 
-echo "-----> Verifying ExifTool installation"
-INSTALLED_VERSION="$(exiftool -ver)"
-if [[ "${INSTALLED_VERSION}" != "${EXIFTOOL_BIN_VERSION}" ]]; then
-  echo "ERROR: ExifTool version mismatch."
-  echo "  expected: ${EXIFTOOL_BIN_VERSION}"
-  echo "  actual:   ${INSTALLED_VERSION}"
-  exit 1
+PLATFORM_DIR="${1:-}"
+PLAN_PATH="${2:?CNB build plan path required as \$2}"
+
+echo "---> Detecting ExifTool Buildpack"
+
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+if [[ "${os}" != "linux" ]]; then
+  echo "-----> Skipping: unsupported OS '${os}' (linux only)"
+  exit 100
 fi
-echo "-----> ExifTool ${INSTALLED_VERSION} OK"
+
+arch="$(uname -m)"
+if [[ "${arch}" != "x86_64" && "${arch}" != "amd64" ]]; then
+  echo "-----> Skipping: unsupported arch '${arch}' (amd64/x86_64 only)"
+  exit 100
+fi
+
+# Reject musl (Alpine, etc.): artefact is glibc-only.
+if [[ -e /lib/ld-musl-x86_64.so.1 ]] || [[ -e /lib/ld-musl-aarch64.so.1 ]]; then
+  echo "-----> Skipping: musl libc detected (glibc required)"
+  exit 100
+fi
+if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | head -n1 | grep -qi musl; then
+  echo "-----> Skipping: musl libc detected via ldd (glibc required)"
+  exit 100
+fi
+
+# Optional platform env dir is unused today; keep arg for CNB contract clarity.
+: "${PLATFORM_DIR}"
+
+cat > "${PLAN_PATH}" <<'PLAN'
+[[provides]]
+name = "exiftool"
+
+[[requires]]
+name = "exiftool"
+PLAN
+
+echo "-----> ExifTool Buildpack detected (linux/amd64/glibc)"
+exit 0
