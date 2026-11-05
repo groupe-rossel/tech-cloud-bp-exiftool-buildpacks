@@ -36,7 +36,7 @@ https://github.com/groupe-rossel/tech-cloud-bp-exiftool-buildpacks/releases/down
 |---|---|
 | [`.github/workflows/exiftool-bin-release.yaml`](../.github/workflows/exiftool-bin-release.yaml) | CI : résolution de version, build, publication |
 | [`scripts/build-exiftool-bin.sh`](../scripts/build-exiftool-bin.sh) | Compilation PAR + smoke test + `SHA256SUMS` |
-| [`bin/build`](../bin/build) | Consommation CNB (download + vérif SHA-256) |
+| [`bin/build`](../bin/build) | Consommation CNB (latest release + `SHA256SUMS` + vérif SHA-256, `cache=false`) |
 
 Les sorties locales vont dans `dist/` (gitignoré) ; elles ne font pas partie du layout CNB sous `bin/`.
 
@@ -99,18 +99,26 @@ bash scripts/build-exiftool-bin.sh
 
 Le script ne modifie jamais `bin/detect` / `bin/build`.
 
-## Bootstrap / bump du pin buildpack
+## Consommation par le buildpack (`bin/build`)
 
-Après la **première** release réussie sur ce dépôt :
+À chaque `pack build`, le buildpack :
 
-1. Actions → **exiftool-bin-release** → Run workflow (ex. `13.59` ou `13.60`)
-2. Copier le hash depuis l’asset `SHA256SUMS` (ou les notes de release)
-3. Mettre à jour dans `bin/build` :
-   - `EXIFTOOL_BIN_VERSION`
-   - `EXIFTOOL_BIN_SHA256`
-4. Bumper `version` dans `buildpack.toml`
+1. Résout la version à installer :
+   - si `BP_EXIFTOOL_MAJOR_VERSION` est **absent** → `GET .../releases/latest`
+   - si `BP_EXIFTOOL_MAJOR_VERSION` est défini → liste les releases, filtre `MAJOR.*`, prend la plus haute (`sort -V`)
+2. Télécharge `SHA256SUMS` et `exiftool-amd64-glibc` pour ce tag
+3. Vérifie le SHA-256 (échec hard si mismatch / fichier vide / download KO)
+4. Installe le binaire dans une layer CNB avec `cache = false` (pas de réutilisation de layer entre builds)
 
-Tant que la release n’existe pas ou que le SHA ne correspond pas au binaire Rossel, un `pack build` qui consomme ce pin échouera au download ou au checksum.
+### `BP_EXIFTOOL_MAJOR_VERSION` (optionnel)
+
+- Type : entier (`12` refusé, `13.5` refusé, `13` OK)
+- Minimum : **13**
+- Absent → latest globale
+- Présent → latest de cette ligne majeure uniquement
+- Aucune release pour la majeure → erreur
+
+Il n’y a pas de pin SHA dans `bin/build` : le checksum vient toujours de `SHA256SUMS` de la release sélectionnée.
 
 ## Vérification manuelle d’un asset publié
 
