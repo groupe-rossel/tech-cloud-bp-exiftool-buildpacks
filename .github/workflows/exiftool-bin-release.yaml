@@ -146,8 +146,6 @@ jobs:
           Code source: https://github.com/exiftool/exiftool/tags (tag ${VERSION}).
           Built from https://github.com/exiftool/exiftool/archive/refs/tags/${VERSION}.tar.gz
 
-          Packaging adapted from https://github.com/pulsejet/exiftool-bin
-          (commit a796daa98a47505db132e031837692313481850a).
 
           Verify:
           \`echo "${SHA256}  exiftool-amd64-glibc" | sha256sum -c -\`
