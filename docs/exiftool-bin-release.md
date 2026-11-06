@@ -21,7 +21,7 @@ Différences principales par rapport à ce dépôt tiers :
 | Asset | `exiftool-amd64-glibc` |
 | Checksums | `SHA256SUMS` (même release) |
 | Tag de release | numéro ExifTool (ex. `13.59`, sans préfixe `v`) |
-| Cible | `linux` / `amd64` / glibc (Ubuntu 24.04) |
+| Cible | `linux` / `amd64` / glibc (Ubuntu 22.04) |
 | Source code | tags [exiftool/exiftool](https://github.com/exiftool/exiftool/tags) uniquement |
 
 URL de téléchargement :
@@ -63,14 +63,14 @@ prepare ──► build (si release absente) ──► release
 - Valide le format `N.N`
 - Si `gh release view "$VERSION"` réussit → `exists=true` → **skip** des jobs suivants (idempotence)
 
-### 2. `build` (container `ubuntu:24.04`)
+### 2. `build` (container `ubuntu:22.04`)
 
 - Installe les deps apt (perl, gcc, curl, …)
 - Checkout du dépôt
 - Exécute `EXIFTOOL_VERSION=$VERSION bash scripts/build-exiftool-bin.sh`
 - Upload artifact Actions `exiftool-amd64-glibc` (`dist/exiftool-amd64-glibc` + `dist/SHA256SUMS`, rétention 7 jours)
 
-Le container Ubuntu 24.04 fixe la glibc du binaire : portable vers des images Docker Ubuntu 24 et 26 ; pas garanti sur des bases plus anciennes que 24.
+Le container Ubuntu 22.04 fixe la glibc du binaire (≈ 2.35) : compatible avec les stacks Paketo / Ubuntu 22+, et a fortiori 24+. Un build sur 24.04 exigerait `GLIBC_2.38` et casserait les stacks plus anciennes.
 
 ### 3. `release` (runner host `ubuntu-latest`)
 

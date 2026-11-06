@@ -62,7 +62,7 @@ jobs:
     if: needs.prepare.outputs.exists == 'false'
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:24.04
+      image: ubuntu:22.04
     defaults:
       run:
         shell: bash
